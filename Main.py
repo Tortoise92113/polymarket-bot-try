@@ -1,125 +1,99 @@
 import time
 import requests
-import pandas
+import pandas as pd
 from datetime import datetime, timezone
 import json
+import os
 
-
+# --- 設定網址 ---
 LIST_URL = "https://gamma-api.polymarket.com/markets"
 SEARCH_URL = "https://gamma-api.polymarket.com/public-search"
 DETAIL_URL = "https://gamma-api.polymarket.com/markets/slug/{}"
 
+# --- 新增：黃金比例計算邏輯 (測試盤點用) ---
+def calculate_strategy(last_price):
+    """
+    Jonerdthan，這部分之後填入你的黃金比例公式。
+    目前先以 0.5 秒延遲與 5% 獲利門檻做示範。
+    """
+    # 假設你的黃金比例線算出來是 0.618
+    golden_line = 0.618 
+    
+    print(f"\n[策略盤點] 當前 LAST 價格: {last_price}")
+    print(f"[策略盤點] 目標黃金線: {golden_line}")
+
+    if last_price < (golden_line * 0.98): # 價差大於 2% 才買
+        print("🚨 觸發買入信號！價格低於黃金線門檻。")
+    elif last_price >= (golden_line * 1.05):
+        print("💰 觸發賣出信號！已達 5% 獲利。")
+    else:
+        print("⏳ 未達門檻，繼續觀望。")
+
 def fetch_and_print_markets():
     slug = pick_eth_updown_slug()
     if not slug:
-        print("找不到 Ethereum Up or Down 的可交易市場（可能暫時沒開或搜尋結果都過期）")
+        print("找不到 Ethereum Up or Down 的可交易市場")
         return
 
-    d = requests.get(DETAIL_URL.format(slug), timeout=15)
-    d.raise_for_status()
-    detail = d.json()
-
-    # detail 可能直接就是 market dict（你之前已驗證過）
-    dm = detail if isinstance(detail, dict) and "slug" in detail else None
-    if not dm:
-        print("detail 回傳格式不符合預期")
+    try:
+        d = requests.get(DETAIL_URL.format(slug), timeout=15)
+        d.raise_for_status()
+        dm = d.json()
+    except Exception as e:
+        print(f"抓取詳細資料失敗: {e}")
         return
 
-    # ===== outcomes 與 tokenIds 對應（非常重要）=====
+    # outcomes 與 tokenIds
     outcomes = dm.get("outcomes")
-    if isinstance(outcomes, str):
-        outcomes = json.loads(outcomes)
-
+    if isinstance(outcomes, str): outcomes = json.loads(outcomes)
     token_ids = dm.get("clobTokenIds")
-    if isinstance(token_ids, str):
-        token_ids = json.loads(token_ids)
-
-    print("=== OUTCOMES / TOKEN IDS 對應 ===")
-    for i, name in enumerate(outcomes or []):
-        tid = token_ids[i] if token_ids and i < len(token_ids) else None
-        print(f"{i}: outcome = {name}, tokenId = {tid}")
-    print("================================")
-    # ================================================
-
+    if isinstance(token_ids, str): token_ids = json.loads(token_ids)
 
     buy = float(dm["bestAsk"]) if dm.get("bestAsk") not in [None, "0", 0] else None
     sell = float(dm["bestBid"]) if dm.get("bestBid") not in [None, "0", 0] else None
-    last = float(dm["lastTradePrice"]) if dm.get("lastTradePrice") not in [None, "0", 0] else None
+    last = float(dm["lastTradePrice"]) if dm.get("lastTradePrice") not in [None, "0", 0] else 0.0
 
-    print("=== ETH Up/Down 報價 ===")
-    print("slug:", dm.get("slug"))
-    print("endDate:", dm.get("endDate"))
-    print("BUY(bestAsk):", buy)
-    print("SELL(bestBid):", sell)
-    print("LAST:", last)
-    print("active:", dm.get("active"), "closed:", dm.get("closed"), "archived:", dm.get("archived"))
-    print("=======================")
-
-
+    print(f"\n=== {dm.get('slug')} 報價分析 ===")
+    print(f"BUY(Ask): {buy} | SELL(Bid): {sell} | LAST: {last}")
+    
+    # --- 執行策略盤點 ---
+    if last > 0:
+        calculate_strategy(last)
 
 def _to_float(x, default=0.0):
-    try:
-        return float(x)
-    except Exception:
-        return default
-
+    try: return float(x)
+    except: return default
 
 def _parse_dt(s):
-    # 例: "2025-12-31T12:00:00Z"
-    try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except Exception:
-        return None
+    try: return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except: return None
 
 def pick_eth_updown_slug():
-    params = {
-        "q": "Ethereum Up or Down",
-        "limit_per_type": 50,
-        "keep_closed_markets": 0,   # 盡量不要把過期市場混進來
-        "optimized": True
-    }
-    r = requests.get(SEARCH_URL, params=params, timeout=15)
-    r.raise_for_status()
-    data = r.json()
+    params = {"q": "Ethereum Up or Down", "limit_per_type": 50, "keep_closed_markets": 0, "optimized": True}
+    try:
+        r = requests.get(SEARCH_URL, params=params, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+    except: return None
 
     now = datetime.now(timezone.utc)
-
     candidates = []
     for ev in (data.get("events") or []):
         for m in (ev.get("markets") or []):
             slug = m.get("slug")
-            if not slug:
-                continue
-
-            # 基本過濾：不要 closed/archived、不要已過期
-            if m.get("closed") is True or m.get("archived") is True:
-                continue
-
+            if not slug or m.get("closed") or m.get("archived"): continue
             end_dt = _parse_dt(m.get("endDate") or "")
-            if end_dt and end_dt <= now:
-                continue
+            if end_dt and end_dt <= now: continue
+            candidates.append((_to_float(m.get("volume24hr")), _to_float(m.get("liquidityNum")), slug))
 
-            v24 = _to_float(m.get("volume24hr"), 0.0)
-            liq = _to_float(m.get("liquidityNum"), 0.0)
-
-            candidates.append((v24, liq, slug, m.get("endDate")))
-
-    # 依 24h 成交量優先，再看流動性
     candidates.sort(reverse=True, key=lambda x: (x[0], x[1]))
-
-    if not candidates:
-        return None
-
-    best = candidates[0]
-    print("✅ picked:", {"slug": best[2], "endDate": best[3], "volume24hr": best[0], "liquidityNum": best[1]})
-    return best[2]
-
-
+    return candidates[0][2] if candidates else None
 
 def main():
-    while True:
-        fetch_and_print_markets()
-        time.sleep(5)
+    print(f"✅ 機器人啟動時間: {datetime.now()}")
+    # 執行一次即結束，由 GitHub Actions 的 cron 定時觸發
+    fetch_and_print_markets()
+    print(f"✅ 執行完畢，結束程式。")
 
 if __name__ == "__main__":
     main()
