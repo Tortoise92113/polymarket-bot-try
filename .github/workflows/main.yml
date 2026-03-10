@@ -2,8 +2,8 @@ name: Polymarket_Bot_Run
 
 on:
   push:                # 當你 push 程式碼到 git 時觸發
-  schedule:
-    - cron: '*/30 * * * *' # 每 30 分鐘自動執行一次 (可調整)
+  # schedule:
+   #  - cron: '*/30 * * * *' # 每 30 分鐘自動執行一次 (可調整)
   workflow_dispatch:   # 允許你手動點擊按鈕執行
 
 jobs:
