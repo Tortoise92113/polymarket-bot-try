@@ -1,29 +1,28 @@
 import data_fetcher
+import strategy
 from datetime import datetime
 
 def main():
     print(f"✅ 機器人啟動時間: {datetime.now()}")
     
-    # 1. 呼叫情報員：給我最好的市場
-    slug = data_fetcher.get_best_market_slug()
-    if not slug:
-        print("目前沒有符合流動性條件的市場，結束程式。")
+    # 1. 抓取最好的市場與對應的 Token ID
+    liq, slug, token_id = data_fetcher.get_best_market_slug()
+    if not slug or not token_id:
+        print("目前沒有符合條件的市場或找不到 Token ID，結束程式。")
         return
         
-    # 2. 呼叫情報員：給我該市場的報價
+    # 2. 獲取當下報價
     market_data = data_fetcher.get_market_data(slug)
     if not market_data:
-        print("無法獲取報價，結束程式。")
         return
         
-    print(f"\n=== 報價分析 ({market_data['slug']}) ===")
-    print(f"BUY(Ask): {market_data['buy_ask']} | SELL(Bid): {market_data['sell_bid']} | LAST: {market_data['last_price']}")
-    print(f"市場流動性: {market_data['liquidity']}")
+    # 3. 獲取歷史 K 線 (用來算黃金線)
+    history_prices = data_fetcher.get_price_history(token_id)
     
-    # 3. 交給軍師 (即將建立的 strategy.py)
-    # strategy.analyze(market_data)
+    # 4. 交給大腦判斷
+    strategy.analyze_and_trade(market_data, history_prices)
     
-    print("\n✅ 執行完畢，等待 GitHub 下次排程。")
+    print("\n✅ 執行完畢，等待下次排程。")
 
 if __name__ == "__main__":
     main()
