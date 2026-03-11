@@ -1,68 +1,46 @@
 import requests
 from datetime import datetime, timezone
 
-SEARCH_URL = "https://gamma-api.polymarket.com/public-search"
-DETAIL_URL = "https://gamma-api.polymarket.com/markets/slug/{}"
+SEARCH_URL = "https://gamma-api.polymarket.com/markets"
+HISTORY_URL = "https://clob.polymarket.com/prices-history"
 
 def _to_float(x, default=0.0):
     try: return float(x)
     except: return default
 
-def _parse_dt(s):
-    try: return datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except: return None
-
 def get_best_market_slug():
-    """精準搜尋 Ethereum above 系列市場"""
-    # SEARCH_URL = "https://gamma-api.polymarket.com/public-search"
-    # 直接下精準關鍵字
-    params = {
-        "q": "Ethereum above", 
-        "limit_per_type": 50
-    }
-    
-    print("🔍 正在 Polymarket 搜尋 'Ethereum above' 相關市場...")
+    params = {"active": True, "closed": False, "limit": 100}
     try:
         r = requests.get(SEARCH_URL, params=params, timeout=15)
         r.raise_for_status()
         data = r.json()
     except Exception as e:
-        print(f"[DataFetcher] API 搜尋失敗: {e}")
+        print(f"[DataFetcher] API 抓取失敗: {e}")
         return None
 
     candidates = []
-    
-    for ev in (data.get("events") or []):
-        for m in (ev.get("markets") or []):
-            slug = m.get("slug", "")
-            liq = _to_float(m.get("liquidityNum"))
+    for m in data:
+        slug = m.get("slug", "")
+        if "ethereum" not in slug.lower(): continue
             
-            # 過濾掉已經關閉的市場
-            if m.get("closed") or m.get("archived") or not m.get("active"):
-                continue
-                
-            # 只要檔名包含 ethereum 且有流動性，就印出來給你看
-            if "ethereum" in slug.lower() and liq > 0:
-                print(f"🎯 發現市場: {slug} | 流動性: {liq}")
-                candidates.append((liq, slug))
+        liq = _to_float(m.get("liquidityNum"))
+        if liq <= 0: continue
+            
+        # 抓取 Token ID (這裡預設抓 index 0，通常是 'Yes' 或 'Up' 的代幣)
+        tokens = m.get("tokens", [])
+        token_id = tokens[0].get("token_id") if tokens else None
+        
+        if token_id:
+            candidates.append((liq, slug, token_id))
 
     candidates.sort(reverse=True, key=lambda x: x[0])
-    
-    if not candidates:
-        print("❌ 目前找不到活躍的 Ethereum above 市場。")
-        return None
-        
-    best_slug = candidates[0][1]
-    print(f"\n✅ 決定鎖定流動性最高的主力市場: {best_slug}")
-    return best_slug
-    
+    return candidates[0] if candidates else (None, None, None)
+
 def get_market_data(slug):
-    """抓取指定市場的詳細報價，並回傳乾淨的字典"""
     try:
-        d = requests.get(DETAIL_URL.format(slug), timeout=15)
-        d.raise_for_status()
-        dm = d.json()
-        
+        r = requests.get(f"https://gamma-api.polymarket.com/markets/slug/{slug}", timeout=15)
+        r.raise_for_status()
+        dm = r.json()
         return {
             "slug": slug,
             "buy_ask": _to_float(dm.get("bestAsk")),
@@ -73,3 +51,18 @@ def get_market_data(slug):
     except Exception as e:
         print(f"[DataFetcher] 抓取報價失敗: {e}")
         return None
+
+def get_price_history(token_id):
+    """抓取該代幣過去 24 小時的歷史價格 (interval=1d)"""
+    params = {"market": token_id, "interval": "1d"}
+    try:
+        r = requests.get(HISTORY_URL, params=params, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        # Polymarket 回傳格式: {"history": [{"t": 時間戳, "p": 價格}, ...]}
+        history = data.get("history", [])
+        prices = [_to_float(item.get("p")) for item in history]
+        return prices
+    except Exception as e:
+        print(f"[DataFetcher] 抓取歷史價格失敗: {e}")
+        return []
