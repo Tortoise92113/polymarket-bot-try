@@ -13,8 +13,9 @@ def _parse_dt(s):
     except: return None
 
 def get_best_market_slug():
-    """尋找流動性與成交量最高的 BTC Up/Down 市場"""
-    params = {"q": "Bitcoin Up or Down", "limit_per_type": 50, "keep_closed_markets": 0, "optimized": True}
+    """尋找流動性最高的 Ethereum 相關市場"""
+    # 🔍 把關鍵字從 "Ethereum Up or Down" 放寬為 "Ethereum"
+    params = {"q": "Ethereum", "limit_per_type": 50, "keep_closed_markets": 0, "optimized": True}
     try:
         r = requests.get(SEARCH_URL, params=params, timeout=15)
         r.raise_for_status()
@@ -33,15 +34,15 @@ def get_best_market_slug():
             end_dt = _parse_dt(m.get("endDate") or "")
             if end_dt and end_dt <= now: continue
             
-            # 🚨 新增防呆：流動性低於 100 的垃圾市場直接跳過
+            # 🚨 條件放寬：只要流動性大於 0 就抓進來測試
             liq = _to_float(m.get("liquidityNum"))
-            if liq < 100: continue
+            if liq <= 0: continue
             
             candidates.append((_to_float(m.get("volume24hr")), liq, slug))
 
     candidates.sort(reverse=True, key=lambda x: (x[0], x[1]))
     return candidates[0][2] if candidates else None
-
+    
 def get_market_data(slug):
     """抓取指定市場的詳細報價，並回傳乾淨的字典"""
     try:
