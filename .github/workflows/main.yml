@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # 加入這行強制升級環境，消滅警告
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
