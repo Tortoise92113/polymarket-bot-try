@@ -13,35 +13,44 @@ def _parse_dt(s):
     except: return None
 
 def get_best_market_slug():
-    """尋找流動性最高的 Ethereum 相關市場"""
-    # 🔍 把關鍵字從 "Ethereum Up or Down" 放寬為 "Ethereum"
-    params = {"q": "Ethereum", "limit_per_type": 50, "keep_closed_markets": 0, "optimized": True}
+    """嚴格鎖定 Ethereum 相關的活躍市場"""
+    url = "https://gamma-api.polymarket.com/markets"
+    params = {
+        "active": True,
+        "closed": False,
+        "limit": 100
+    }
     try:
-        r = requests.get(SEARCH_URL, params=params, timeout=15)
+        r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
         data = r.json()
     except Exception as e:
-        print(f"[DataFetcher] API 搜尋失敗: {e}")
+        print(f"[DataFetcher] API 抓取失敗: {e}")
         return None
 
-    now = datetime.now(timezone.utc)
     candidates = []
-    
-    for ev in (data.get("events") or []):
-        for m in (ev.get("markets") or []):
-            slug = m.get("slug")
-            if not slug or m.get("closed") or m.get("archived"): continue
-            end_dt = _parse_dt(m.get("endDate") or "")
-            if end_dt and end_dt <= now: continue
+    for m in data:
+        slug = m.get("slug", "")
+        
+        # 🚨 核心防護：只允許 Ethereum 相關市場
+        if "ethereum" not in slug.lower():
+            continue
             
-            # 🚨 條件放寬：只要流動性大於 0 就抓進來測試
-            liq = _to_float(m.get("liquidityNum"))
-            if liq <= 0: continue
+        liq = _to_float(m.get("liquidityNum"))
+        # 流動性必須大於 0
+        if liq <= 0: 
+            continue
             
-            candidates.append((_to_float(m.get("volume24hr")), liq, slug))
+        candidates.append((liq, slug))
 
-    candidates.sort(reverse=True, key=lambda x: (x[0], x[1]))
-    return candidates[0][2] if candidates else None
+    # 依流動性從大到小排序，挑最有肉的那個
+    candidates.sort(reverse=True, key=lambda x: x[0])
+    
+    if not candidates:
+        print("[DataFetcher] 目前無活躍的 Ethereum 市場。")
+        return None
+        
+    return candidates[0][1]
     
 def get_market_data(slug):
     """抓取指定市場的詳細報價，並回傳乾淨的字典"""
