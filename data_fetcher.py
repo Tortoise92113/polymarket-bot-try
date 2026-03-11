@@ -2,20 +2,24 @@ import requests
 import json
 
 def get_best_market_slug():
-    url = "https://gamma-api.polymarket.com/markets"
-    params = {"active": True, "closed": False, "limit": 100}
+    url = "https://gamma-api.polymarket.com/public-search"
+    # 🎯 鎖定你之前測試成功的精準關鍵字
+    params = {"q": "Ethereum above", "limit_per_type": 50}
     try:
         r = requests.get(url, params=params, timeout=15)
         candidates = []
-        for m in r.json():
-            slug = m.get("slug", "")
-            liq = float(m.get("liquidityNum", 0) or 0)
-            if "ethereum" in slug.lower() and liq > 0:
-                candidates.append((liq, slug))
+        for ev in r.json().get("events", []):
+            for m in ev.get("markets", []):
+                slug = m.get("slug", "")
+                liq = float(m.get("liquidityNum", 0) or 0)
+                # 確保是活躍市場且有流動性
+                if "ethereum" in slug.lower() and liq > 0 and m.get("active") and not m.get("closed"):
+                    candidates.append((liq, slug))
+        
         candidates.sort(reverse=True, key=lambda x: x[0])
         return candidates[0][1] if candidates else None
     except Exception as e:
-        print(f"[錯誤] 搜尋市場失敗: {e}")
+        print(f"[錯誤] 搜尋失敗: {e}")
         return None
 
 def get_market_data(slug):
