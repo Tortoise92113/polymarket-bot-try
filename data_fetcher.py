@@ -13,8 +13,8 @@ def _parse_dt(s):
     except: return None
 
 def get_best_market_slug():
-    """尋找流動性與成交量最高的 ETH Up/Down 市場"""
-    params = {"q": "Ethereum Up or Down", "limit_per_type": 50, "keep_closed_markets": 0, "optimized": True}
+    """尋找流動性與成交量最高的 BTC Up/Down 市場"""
+    params = {"q": "Bitcoin Up or Down", "limit_per_type": 50, "keep_closed_markets": 0, "optimized": True}
     try:
         r = requests.get(SEARCH_URL, params=params, timeout=15)
         r.raise_for_status()
