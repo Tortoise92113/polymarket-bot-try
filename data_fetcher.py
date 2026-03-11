@@ -13,44 +13,48 @@ def _parse_dt(s):
     except: return None
 
 def get_best_market_slug():
-    """嚴格鎖定 Ethereum 相關的活躍市場"""
-    url = "https://gamma-api.polymarket.com/markets"
+    """精準搜尋 Ethereum above 系列市場"""
+    # SEARCH_URL = "https://gamma-api.polymarket.com/public-search"
+    # 直接下精準關鍵字
     params = {
-        "active": True,
-        "closed": False,
-        "limit": 100
+        "q": "Ethereum above", 
+        "limit_per_type": 50
     }
+    
+    print("🔍 正在 Polymarket 搜尋 'Ethereum above' 相關市場...")
     try:
-        r = requests.get(url, params=params, timeout=15)
+        r = requests.get(SEARCH_URL, params=params, timeout=15)
         r.raise_for_status()
         data = r.json()
     except Exception as e:
-        print(f"[DataFetcher] API 抓取失敗: {e}")
+        print(f"[DataFetcher] API 搜尋失敗: {e}")
         return None
 
     candidates = []
-    for m in data:
-        slug = m.get("slug", "")
-        
-        # 🚨 核心防護：只允許 Ethereum 相關市場
-        if "ethereum" not in slug.lower():
-            continue
+    
+    for ev in (data.get("events") or []):
+        for m in (ev.get("markets") or []):
+            slug = m.get("slug", "")
+            liq = _to_float(m.get("liquidityNum"))
             
-        liq = _to_float(m.get("liquidityNum"))
-        # 流動性必須大於 0
-        if liq <= 0: 
-            continue
-            
-        candidates.append((liq, slug))
+            # 過濾掉已經關閉的市場
+            if m.get("closed") or m.get("archived") or not m.get("active"):
+                continue
+                
+            # 只要檔名包含 ethereum 且有流動性，就印出來給你看
+            if "ethereum" in slug.lower() and liq > 0:
+                print(f"🎯 發現市場: {slug} | 流動性: {liq}")
+                candidates.append((liq, slug))
 
-    # 依流動性從大到小排序，挑最有肉的那個
     candidates.sort(reverse=True, key=lambda x: x[0])
     
     if not candidates:
-        print("[DataFetcher] 目前無活躍的 Ethereum 市場。")
+        print("❌ 目前找不到活躍的 Ethereum above 市場。")
         return None
         
-    return candidates[0][1]
+    best_slug = candidates[0][1]
+    print(f"\n✅ 決定鎖定流動性最高的主力市場: {best_slug}")
+    return best_slug
     
 def get_market_data(slug):
     """抓取指定市場的詳細報價，並回傳乾淨的字典"""
