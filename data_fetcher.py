@@ -1,68 +1,51 @@
 import requests
-from datetime import datetime, timezone
-
-SEARCH_URL = "https://gamma-api.polymarket.com/markets"
-HISTORY_URL = "https://clob.polymarket.com/prices-history"
-
-def _to_float(x, default=0.0):
-    try: return float(x)
-    except: return default
+import json
 
 def get_best_market_slug():
+    url = "https://gamma-api.polymarket.com/markets"
     params = {"active": True, "closed": False, "limit": 100}
     try:
-        r = requests.get(SEARCH_URL, params=params, timeout=15)
-        r.raise_for_status()
-        data = r.json()
+        r = requests.get(url, params=params, timeout=15)
+        candidates = []
+        for m in r.json():
+            slug = m.get("slug", "")
+            liq = float(m.get("liquidityNum", 0) or 0)
+            if "ethereum" in slug.lower() and liq > 0:
+                candidates.append((liq, slug))
+        candidates.sort(reverse=True, key=lambda x: x[0])
+        return candidates[0][1] if candidates else None
     except Exception as e:
-        print(f"[DataFetcher] API 抓取失敗: {e}")
+        print(f"[錯誤] 搜尋市場失敗: {e}")
         return None
-
-    candidates = []
-    for m in data:
-        slug = m.get("slug", "")
-        if "ethereum" not in slug.lower(): continue
-            
-        liq = _to_float(m.get("liquidityNum"))
-        if liq <= 0: continue
-            
-        # 抓取 Token ID (這裡預設抓 index 0，通常是 'Yes' 或 'Up' 的代幣)
-        tokens = m.get("tokens", [])
-        token_id = tokens[0].get("token_id") if tokens else None
-        
-        if token_id:
-            candidates.append((liq, slug, token_id))
-
-    candidates.sort(reverse=True, key=lambda x: x[0])
-    return candidates[0] if candidates else (None, None, None)
 
 def get_market_data(slug):
     try:
         r = requests.get(f"https://gamma-api.polymarket.com/markets/slug/{slug}", timeout=15)
-        r.raise_for_status()
         dm = r.json()
+        
+        # 安全抓取 Token ID (從 clobTokenIds 拿第一個)
+        token_ids = dm.get("clobTokenIds")
+        if isinstance(token_ids, str): token_ids = json.loads(token_ids)
+        token_id = token_ids[0] if token_ids else None
+
         return {
             "slug": slug,
-            "buy_ask": _to_float(dm.get("bestAsk")),
-            "sell_bid": _to_float(dm.get("bestBid")),
-            "last_price": _to_float(dm.get("lastTradePrice")),
-            "liquidity": _to_float(dm.get("liquidityNum"))
+            "buy_ask": float(dm.get("bestAsk", 0) or 0),
+            "sell_bid": float(dm.get("bestBid", 0) or 0),
+            "last_price": float(dm.get("lastTradePrice", 0) or 0),
+            "liquidity": float(dm.get("liquidityNum", 0) or 0),
+            "token_id": token_id
         }
     except Exception as e:
-        print(f"[DataFetcher] 抓取報價失敗: {e}")
+        print(f"[錯誤] 獲取報價失敗: {e}")
         return None
 
 def get_price_history(token_id):
-    """抓取該代幣過去 24 小時的歷史價格 (interval=1d)"""
-    params = {"market": token_id, "interval": "1d"}
+    if not token_id: return []
     try:
-        r = requests.get(HISTORY_URL, params=params, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        # Polymarket 回傳格式: {"history": [{"t": 時間戳, "p": 價格}, ...]}
-        history = data.get("history", [])
-        prices = [_to_float(item.get("p")) for item in history]
-        return prices
+        r = requests.get("https://clob.polymarket.com/prices-history", params={"market": token_id, "interval": "1d"}, timeout=15)
+        # 提取歷史價格陣列
+        return [float(item.get("p", 0)) for item in r.json().get("history", [])]
     except Exception as e:
-        print(f"[DataFetcher] 抓取歷史價格失敗: {e}")
+        print(f"[錯誤] 獲取歷史價格失敗: {e}")
         return []
